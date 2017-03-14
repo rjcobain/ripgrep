@@ -5,6 +5,8 @@
 - Strip symbols from the binary by running `strip ./rg`
 - Zip each build, and name with the same scheme as in earlier releases
 - Create a release for the ripgrep tag on `roblourens/ripgrep`, and upload the .zips
+- If the ripgrep version number changed, update `vscode-ripgrep` to reference the newer version, and publish `vscode-ripgrep`
+- Update the `vscode-ripgrep` dep in vscode
 
 ## How to produce ripgrep builds
 
