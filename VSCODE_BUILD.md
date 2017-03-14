@@ -2,8 +2,9 @@
 
 - Clone ripgrep and checkout the latest release tag (from upstream)
 - Build for each platform and architecture (see below)
+- Strip symbols from the binary by running `strip ./rg`
 - Zip each build, and name with the same scheme as in earlier releases
-- Create a release for the tag on `roblourens/ripgrep`, and upload the .zips
+- Create a release for the ripgrep tag on `roblourens/ripgrep`, and upload the .zips
 
 ## How to produce ripgrep builds
 
@@ -36,3 +37,4 @@ On Linux we need to build 64-bit, 32-bit, and ARM. These steps assume that your 
     linker = "arm-linux-gnueabi-gcc"
     ```
   - Build: `cargo build --release --target=arm-unknown-linux-gnueabi`
+  - To strip symbols, you'll need to run `arm-linux-gnueabi-strip ./rg` instead of using `strip`.
