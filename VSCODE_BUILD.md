@@ -26,8 +26,9 @@ We need to ship a 32-bit binary for Windows, but Rust will probably be set up fo
 ### Linux
 On Linux we need to build 64-bit, 32-bit, and ARM. These steps assume that your Linux install is 64-bit.
 
-- Build following the typical directions, which should produce your 64-bit binary.
-- To build 32-bit, first add the Rust target, as on Windows: `rustup target add i686-unknown-linux-gnu`
+- To build 64-bit, add a new target: `rustup target add x86_64-unknown-linux-musl`
+  - Then build with that target: `cargo build --release --target=x86_64-unknown-linux-musl` to produce a statically-linked binary.
+- To build 32-bit, first add the Rust target: `rustup target add i686-unknown-linux-musl`
   - Then ensure you have the 32-bit libraries you need for GCC: `apt-get install gcc-multilib`
   - Then ensure that GCC uses the stuff you just installed: `export CFLAGS=-m32`
   - Finally, `cargo build --release --target=i686-unknown-linux-gnu`
