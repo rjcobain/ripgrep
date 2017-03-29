@@ -16,10 +16,11 @@ Start by installing Rust and following the directions at https://github.com/robl
 Nothing special.
 
 ### Windows
-We need to ship a 32-bit binary for Windows, but Rust will probably be set up for 64-bit mode by default.
+We need to ship a 32-bit binary for Windows, but Rust will probably be set up for 64-bit mode by default. It also needs to be statically compiled so that it will run on machines that don't have the Visual C++ Runtime installed.
 
 - You probably have `rustup` installed and on your path. If not, [install it](https://www.rustup.rs/).
 - Run `rustup target add i686-pc-windows-msvc` to install the 32 bit toolchain
+- Run `$env:RUSTFLAGS='-C target-feature=+crt-static -Z unstable-options`
 - Run `cargo build --release --target=i686-pc-windows-msvc`, which will drop its binary at `./target/i686-pc-windows-msvc/release/rg`.
 - Done!
 
