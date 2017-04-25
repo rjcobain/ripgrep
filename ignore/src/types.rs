@@ -155,6 +155,7 @@ const DEFAULT_TYPES: &'static [(&'static str, &'static [&'static str])] = &[
     ("mk", &["mkfile"]),
     ("ml", &["*.ml"]),
     ("nim", &["*.nim"]),
+    ("nix", &["*.nix"]),
     ("objc", &["*.h", "*.m"]),
     ("objcpp", &["*.h", "*.mm"]),
     ("ocaml", &["*.ml", "*.mli", "*.mll", "*.mly"]),
@@ -191,6 +192,7 @@ const DEFAULT_TYPES: &'static [(&'static str, &'static [&'static str])] = &[
     ("twig", &["*.twig"]),
     ("vala", &["*.vala"]),
     ("vb", &["*.vb"]),
+    ("vim", &["*.vim"]),
     ("vimscript", &["*.vim"]),
     ("wiki", &["*.mediawiki", "*.wiki"]),
     ("xml", &["*.xml"]),
@@ -446,13 +448,18 @@ impl TypesBuilder {
                     GlobBuilder::new(glob)
                         .literal_separator(true)
                         .build()
-                        .map_err(|err| Error::Glob(err.to_string()))));
+                        .map_err(|err| {
+                            Error::Glob {
+                                glob: Some(glob.to_string()),
+                                err: err.kind().to_string(),
+                            }
+                        })));
                 glob_to_selection.push((isel, iglob));
             }
             selections.push(selection.clone().map(move |_| def));
         }
         let set = try!(build_set.build().map_err(|err| {
-            Error::Glob(err.to_string())
+            Error::Glob { glob: None, err: err.to_string() }
         }));
         Ok(Types {
             defs: defs,

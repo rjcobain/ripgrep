@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::cmp;
 use std::io::{self, Read};
 
@@ -290,10 +288,6 @@ mod tests {
 
     use super::{Bom, BomPeeker, DecodeReader};
 
-    fn utf8(bytes: &[u8]) -> &str {
-        ::std::str::from_utf8(bytes).unwrap()
-    }
-
     fn read_to_string<R: Read>(mut rdr: R) -> String {
         let mut s = String::new();
         rdr.read_to_string(&mut s).unwrap();
@@ -453,7 +447,8 @@ mod tests {
     test_trans_simple!(trans_simple_utf16be, "utf-16be", b"\x04\x16", "Ж");
     test_trans_simple!(trans_simple_chinese, "chinese", b"\xA7\xA8", "Ж");
     test_trans_simple!(trans_simple_korean, "korean", b"\xAC\xA8", "Ж");
-    test_trans_simple!(trans_simple_big5_hkscs, "big5-hkscs", b"\xC7\xFA", "Ж");
+    test_trans_simple!(
+        trans_simple_big5_hkscs, "big5-hkscs", b"\xC7\xFA", "Ж");
     test_trans_simple!(trans_simple_gbk, "gbk", b"\xA7\xA8", "Ж");
     test_trans_simple!(trans_simple_sjis, "sjis", b"\x84\x47", "Ж");
     test_trans_simple!(trans_simple_eucjp, "euc-jp", b"\xA7\xA8", "Ж");

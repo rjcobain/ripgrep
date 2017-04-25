@@ -32,16 +32,6 @@ ARGS:
 OPTIONS:
 {unified}";
 
-/// Build a clap application with short help strings.
-pub fn app_short() -> App<'static, 'static> {
-    app(false, |k| USAGES[k].short)
-}
-
-/// Build a clap application with long help strings.
-pub fn app_long() -> App<'static, 'static> {
-    app(true, |k| USAGES[k].long)
-}
-
 /// Build a clap application parameterized by usage strings.
 ///
 /// The function given should take a clap argument name and return a help
@@ -49,10 +39,11 @@ pub fn app_long() -> App<'static, 'static> {
 ///
 /// This is an intentionally stand-alone module so that it can be used easily
 /// in a `build.rs` script to build shell completion files.
-fn app<F>(next_line_help: bool, doc: F) -> App<'static, 'static>
-        where F: Fn(&'static str) -> &'static str {
+pub fn app() -> App<'static, 'static> {
     let arg = |name| {
-        Arg::with_name(name).help(doc(name)).next_line_help(next_line_help)
+        Arg::with_name(name)
+            .help(USAGES[name].short)
+            .long_help(USAGES[name].long)
     };
     let flag = |name| arg(name).long(name);
 
@@ -64,11 +55,7 @@ fn app<F>(next_line_help: bool, doc: F) -> App<'static, 'static>
         .setting(AppSettings::UnifiedHelpMessage)
         .usage(USAGE)
         .template(TEMPLATE)
-        // Handle help/version manually to make their output formatting
-        // consistent with short/long views.
-        .arg(arg("help-short").short("h"))
-        .arg(flag("help"))
-        .arg(arg("ripgrep-version").long("version").short("V"))
+        .help_message("Prints help information. Use --help for more details.")
         // First, set up primary positional/flag arguments.
         .arg(arg("pattern")
              .required_unless_one(&[
@@ -129,6 +116,8 @@ fn app<F>(next_line_help: bool, doc: F) -> App<'static, 'static>
         .arg(flag("column"))
         .arg(flag("context-separator")
              .value_name("SEPARATOR").takes_value(true))
+        .arg(flag("dfa-size-limit")
+             .value_name("NUM+SUFFIX?").takes_value(true))
         .arg(flag("debug"))
         .arg(flag("file").short("f")
              .value_name("FILE").takes_value(true)
@@ -158,10 +147,13 @@ fn app<F>(next_line_help: bool, doc: F) -> App<'static, 'static>
         .arg(flag("no-ignore"))
         .arg(flag("no-ignore-parent"))
         .arg(flag("no-ignore-vcs"))
-        .arg(flag("null"))
+        .arg(flag("null").short("0"))
+        .arg(flag("only-matching").short("o").conflicts_with("replace"))
         .arg(flag("path-separator").value_name("SEPARATOR").takes_value(true))
         .arg(flag("pretty").short("p"))
         .arg(flag("replace").short("r").value_name("ARG").takes_value(true))
+        .arg(flag("regex-size-limit")
+             .value_name("NUM+SUFFIX?").takes_value(true))
         .arg(flag("case-sensitive").short("s"))
         .arg(flag("smart-case").short("S"))
         .arg(flag("sort-files"))
@@ -249,12 +241,12 @@ lazy_static! {
               red, blue, green, cyan, magenta, yellow, white and black. \
               Styles are limited to nobold, bold, nointense or intense.\n\n\
               The format of the flag is {type}:{attribute}:{value}. {type} \
-              should be one of path, line or match. {attribute} can be fg, bg \
-              or style. {value} is either a color (for fg and bg) or a text \
-              style. A special format, {type}:none, will clear all color \
-              settings for {type}.\n\nFor example, the following command will \
-              change the match color to magenta and the background color for \
-              line numbers to yellow:\n\n\
+              should be one of path, line, column or match. {attribute} can \
+              be fg, bg or style. {value} is either a color (for fg and bg) \
+              or a text style. A special format, {type}:none, will clear all \
+              color settings for {type}.\n\nFor example, the following \
+              command will change the match color to magenta and the \
+              background color for line numbers to yellow:\n\n\
               rg --colors 'match:fg:magenta' --colors 'line:bg:yellow' foo.");
         doc!(h, "encoding",
              "Specify the text encoding of files to search.",
@@ -340,6 +332,13 @@ lazy_static! {
         doc!(h, "debug",
              "Show debug messages.",
              "Show debug messages. Please use this when filing a bug report.");
+        doc!(h, "dfa-size-limit",
+             "The upper size limit of the generated dfa.",
+             "The upper size limit of the generated dfa. The default limit is \
+              10M. This should only be changed on very large regex inputs \
+              where the (slower) fallback regex engine may otherwise be used. \
+              \n\nThe argument accepts the same size suffixes as allowed in \
+              the 'max-filesize' argument.");
         doc!(h, "file",
              "Search for patterns from the given file.",
              "Search for patterns from the given file, with one pattern per \
@@ -388,10 +387,11 @@ lazy_static! {
              "Limit the number of matching lines per file searched to NUM.");
         doc!(h, "max-filesize",
              "Ignore files larger than NUM in size.",
-             "Ignore files larger than NUM in size. Does not ignore directories. \
+             "Ignore files larger than NUM in size. Does not ignore \
+              directories. \
               \n\nThe input format accepts suffixes of K, M or G which \
-              correspond to kilobytes, megabytes and gigabytes. If no suffix is \
-              provided the input is treated as bytes. \
+              correspond to kilobytes, megabytes and gigabytes. If no suffix \
+              is provided the input is treated as bytes. \
               \n\nExample: --max-filesize 50K or --max-filesize 80M");
         doc!(h, "maxdepth",
              "Descend at most NUM directories.",
@@ -435,6 +435,10 @@ lazy_static! {
               printing a list of matching files such as with --count, \
               --files-with-matches and --files. This option is useful for use \
               with xargs.");
+        doc!(h, "only-matching",
+             "Print only matched parts of a line.",
+             "Print only the matched (non-empty) parts of a matching line, \
+              with each such part on a separate output line.");
         doc!(h, "path-separator",
              "Path separator to use when printing file paths.",
              "The path separator to use when printing file paths. This \
@@ -453,6 +457,11 @@ lazy_static! {
               Note that the replacement by default replaces each match, and \
               NOT the entire line. To replace the entire line, you should \
               match the entire line.");
+        doc!(h, "regex-size-limit",
+             "The upper size limit of the compiled regex.",
+             "The upper size limit of the compiled regex. The default limit \
+              is 10M. \n\nThe argument accepts the same size suffixes as \
+              allowed in the 'max-filesize' argument.");
         doc!(h, "case-sensitive",
              "Search case sensitively.",
              "Search case sensitively. This overrides -i/--ignore-case and \
@@ -496,8 +505,8 @@ lazy_static! {
               permits specifying one or more other type names (separated by a \
               comma) that have been defined and its rules will automatically \
               be imported into the type specified. For example, to create a \
-              type called src that matches C++, Python and Markdown files, one \
-              can use:\n\n\
+              type called src that matches C++, Python and Markdown files, \
+              one can use:\n\n\
               --type-add 'src:include:cpp,py,md'\n\n\
               Additional glob rules can still be added to the src type by \
               using the --type-add flag again:\n\n\

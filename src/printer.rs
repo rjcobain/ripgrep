@@ -58,6 +58,8 @@ pub struct Printer<W> {
     /// Whether to print NUL bytes after a file path instead of new lines
     /// or `:`.
     null: bool,
+    /// Print only the matched (non-empty) parts of a matching line
+    only_matching: bool,
     /// A string to use as a replacement of each match in a matching line.
     replace: Option<Vec<u8>>,
     /// Whether to prefix each match with the corresponding file name.
@@ -83,6 +85,7 @@ impl<W: WriteColor> Printer<W> {
             heading: false,
             line_per_match: false,
             null: false,
+            only_matching: false,
             replace: None,
             with_filename: false,
             colors: ColorSpecs::default(),
@@ -144,6 +147,12 @@ impl<W: WriteColor> Printer<W> {
         self
     }
 
+    /// Print only the matched (non-empty) parts of a matching line
+    pub fn only_matching(mut self, yes: bool) -> Printer<W> {
+        self.only_matching = yes;
+        self
+    }
+
     /// A separator to use when printing file paths. When empty, use the
     /// default separator for the current platform. (/ on Unix, \ on Windows.)
     pub fn path_separator(mut self, sep: Option<u8>) -> Printer<W> {
@@ -153,9 +162,6 @@ impl<W: WriteColor> Printer<W> {
 
     /// Replace every match in each matching line with the replacement string
     /// given.
-    ///
-    /// The replacement string syntax is documented here:
-    /// https://doc.rust-lang.org/regex/regex/bytes/struct.Captures.html#method.expand
     pub fn replace(mut self, replacement: Vec<u8>) -> Printer<W> {
         self.replace = Some(replacement);
         self
@@ -204,22 +210,14 @@ impl<W: WriteColor> Printer<W> {
     pub fn path<P: AsRef<Path>>(&mut self, path: P) {
         let path = strip_prefix("./", path.as_ref()).unwrap_or(path.as_ref());
         self.write_path(path);
-        if self.null {
-            self.write(b"\x00");
-        } else {
-            self.write_eol();
-        }
+        self.write_path_eol();
     }
 
     /// Prints the given path and a count of the number of matches found.
     pub fn path_count<P: AsRef<Path>>(&mut self, path: P, count: u64) {
         if self.with_filename {
             self.write_path(path);
-            if self.null {
-                self.write(b"\x00");
-            } else {
-                self.write(b":");
-            }
+            self.write_path_sep(b':');
         }
         self.write(count.to_string().as_bytes());
         self.write_eol();
@@ -227,13 +225,11 @@ impl<W: WriteColor> Printer<W> {
 
     /// Prints the context separator.
     pub fn context_separate(&mut self) {
-        // N.B. We can't use `write` here because of borrowing restrictions.
         if self.context_separator.is_empty() {
             return;
         }
-        self.has_printed = true;
         let _ = self.wtr.write_all(&self.context_separator);
-        let _ = self.wtr.write_all(&[self.eol]);
+        self.write_eol();
     }
 
     pub fn matched<P: AsRef<Path>>(
@@ -245,24 +241,14 @@ impl<W: WriteColor> Printer<W> {
         end: usize,
         line_number: Option<u64>,
     ) {
-        if !self.line_per_match {
-            let column =
-                if self.column {
-                    Some(re.find(&buf[start..end])
-                           .map(|m| m.start()).unwrap_or(0) as u64)
-                } else {
-                    None
-                };
+        if !self.line_per_match && !self.only_matching {
+            let column = re.find(&buf[start..end])
+                           .map(|m| m.start()).unwrap_or(0);
             return self.write_match(
                 re, path, buf, start, end, line_number, column);
         }
         for m in re.find_iter(&buf[start..end]) {
-            let column =
-                if self.column {
-                    Some(m.start() as u64)
-                } else {
-                    None
-                };
+            let column = m.start();
             self.write_match(
                 re, path.as_ref(), buf, start, end, line_number, column);
         }
@@ -276,20 +262,21 @@ impl<W: WriteColor> Printer<W> {
         start: usize,
         end: usize,
         line_number: Option<u64>,
-        column: Option<u64>,
+        column: usize,
     ) {
         if self.heading && self.with_filename && !self.has_printed {
             self.write_file_sep();
-            self.write_heading(path.as_ref());
+            self.write_path(path);
+            self.write_path_eol();
         } else if !self.heading && self.with_filename {
-            self.write_non_heading_path(path.as_ref());
+            self.write_path(path);
+            self.write_path_sep(b':');
         }
         if let Some(line_number) = line_number {
             self.line_number(line_number, b':');
         }
-        if let Some(c) = column {
-            self.write((c + 1).to_string().as_bytes());
-            self.write(b":");
+        if self.column {
+            self.column_number(column as u64 + 1, b':');
         }
         if self.replace.is_some() {
             let mut count = 0;
@@ -299,11 +286,9 @@ impl<W: WriteColor> Printer<W> {
                 re.replace_all(&buf[start..end], replacer)
             };
             if self.max_columns.map_or(false, |m| line.len() > m) {
-                let _ = self.wtr.set_color(self.colors.matched());
                 let msg = format!(
                     "[Omitted long line with {} replacements]", count);
-                self.write(msg.as_bytes());
-                let _ = self.wtr.reset();
+                self.write_colored(msg.as_bytes(), |colors| colors.matched());
                 self.write_eol();
                 return;
             }
@@ -312,7 +297,14 @@ impl<W: WriteColor> Printer<W> {
                 self.write_eol();
             }
         } else {
-            self.write_matched_line(re, &buf[start..end]);
+            let line_buf = if self.only_matching {
+                let start_offset = start + column;
+                let m = re.find(&buf[start_offset..end]).unwrap();
+                &buf[start_offset + m.start()..start_offset + m.end()]
+            } else {
+                &buf[start..end]
+            };
+            self.write_matched_line(re, line_buf);
             // write_matched_line guarantees to write a newline.
         }
     }
@@ -320,10 +312,8 @@ impl<W: WriteColor> Printer<W> {
     fn write_matched_line(&mut self, re: &Regex, buf: &[u8]) {
         if self.max_columns.map_or(false, |m| buf.len() > m) {
             let count = re.find_iter(buf).count();
-            let _ = self.wtr.set_color(self.colors.matched());
             let msg = format!("[Omitted long line with {} matches]", count);
-            self.write(msg.as_bytes());
-            let _ = self.wtr.reset();
+            self.write_colored(msg.as_bytes(), |colors| colors.matched());
             self.write_eol();
             return;
         }
@@ -333,9 +323,8 @@ impl<W: WriteColor> Printer<W> {
             let mut last_written = 0;
             for m in re.find_iter(buf) {
                 self.write(&buf[last_written..m.start()]);
-                let _ = self.wtr.set_color(self.colors.matched());
-                self.write(&buf[m.start()..m.end()]);
-                let _ = self.wtr.reset();
+                self.write_colored(
+                    &buf[m.start()..m.end()], |colors| colors.matched());
                 last_written = m.end();
             }
             self.write(&buf[last_written..]);
@@ -355,14 +344,11 @@ impl<W: WriteColor> Printer<W> {
     ) {
         if self.heading && self.with_filename && !self.has_printed {
             self.write_file_sep();
-            self.write_heading(path.as_ref());
+            self.write_path(path);
+            self.write_path_eol();
         } else if !self.heading && self.with_filename {
-            self.write_path(path.as_ref());
-            if self.null {
-                self.write(b"\x00");
-            } else {
-                self.write(b"-");
-            }
+            self.write_path(path);
+            self.write_path_sep(b'-');
         }
         if let Some(line_number) = line_number {
             self.line_number(line_number, b'-');
@@ -378,10 +364,19 @@ impl<W: WriteColor> Printer<W> {
         }
     }
 
-    fn write_heading<P: AsRef<Path>>(&mut self, path: P) {
-        let _ = self.wtr.set_color(self.colors.path());
-        self.write_path(path.as_ref());
-        let _ = self.wtr.reset();
+    fn separator(&mut self, sep: &[u8]) {
+        self.write(&sep);
+    }
+
+    fn write_path_sep(&mut self, sep: u8) {
+        if self.null {
+            self.write(b"\x00");
+        } else {
+            self.separator(&[sep]);
+        }
+    }
+
+    fn write_path_eol(&mut self) {
         if self.null {
             self.write(b"\x00");
         } else {
@@ -389,52 +384,43 @@ impl<W: WriteColor> Printer<W> {
         }
     }
 
-    fn write_non_heading_path<P: AsRef<Path>>(&mut self, path: P) {
-        let _ = self.wtr.set_color(self.colors.path());
-        self.write_path(path.as_ref());
-        let _ = self.wtr.reset();
-        if self.null {
-            self.write(b"\x00");
-        } else {
-            self.write(b":");
-        }
-    }
-
-    fn line_number(&mut self, n: u64, sep: u8) {
-        let _ = self.wtr.set_color(self.colors.line());
-        self.write(n.to_string().as_bytes());
-        let _ = self.wtr.reset();
-        self.write(&[sep]);
-    }
-
     #[cfg(unix)]
     fn write_path<P: AsRef<Path>>(&mut self, path: P) {
         use std::os::unix::ffi::OsStrExt;
-
         let path = path.as_ref().as_os_str().as_bytes();
-        match self.path_separator {
-            None => self.write(path),
-            Some(sep) => self.write_path_with_sep(path, sep),
-        }
+        self.write_path_replace_separator(path);
     }
 
     #[cfg(not(unix))]
     fn write_path<P: AsRef<Path>>(&mut self, path: P) {
         let path = path.as_ref().to_string_lossy();
+        self.write_path_replace_separator(path.as_bytes());
+    }
+
+    fn write_path_replace_separator(&mut self, path: &[u8]) {
         match self.path_separator {
-            None => self.write(path.as_bytes()),
-            Some(sep) => self.write_path_with_sep(path.as_bytes(), sep),
+            None => self.write_colored(path, |colors| colors.path()),
+            Some(sep) => {
+                let transformed_path: Vec<_> = path.iter().map(|&b| {
+                    if b == b'/' || (cfg!(windows) && b == b'\\') {
+                        sep
+                    } else {
+                        b
+                    }
+                }).collect();
+                self.write_colored(&transformed_path, |colors| colors.path());
+            }
         }
     }
 
-    fn write_path_with_sep(&mut self, path: &[u8], sep: u8) {
-        let mut path = path.to_vec();
-        for b in &mut path {
-            if *b == b'/' || (cfg!(windows) && *b == b'\\') {
-                *b = sep;
-            }
-        }
-        self.write(&path);
+    fn line_number(&mut self, n: u64, sep: u8) {
+        self.write_colored(n.to_string().as_bytes(), |colors| colors.line());
+        self.separator(&[sep]);
+    }
+
+    fn column_number(&mut self, n: u64, sep: u8) {
+        self.write_colored(n.to_string().as_bytes(), |colors| colors.column());
+        self.separator(&[sep]);
     }
 
     fn write(&mut self, buf: &[u8]) {
@@ -445,6 +431,14 @@ impl<W: WriteColor> Printer<W> {
     fn write_eol(&mut self) {
         let eol = self.eol;
         self.write(&[eol]);
+    }
+
+    fn write_colored<F>(&mut self, buf: &[u8], get_color: F)
+        where F: Fn(&ColorSpecs) -> &ColorSpec
+    {
+        let _ = self.wtr.set_color( get_color(&self.colors) );
+        self.write(buf);
+        let _ = self.wtr.reset();
     }
 
     fn write_file_sep(&mut self) {
@@ -492,7 +486,7 @@ impl fmt::Display for Error {
         match *self {
             Error::UnrecognizedOutType(ref name) => {
                 write!(f, "Unrecognized output type '{}'. Choose from: \
-                           path, line, match.", name)
+                           path, line, column, match.", name)
             }
             Error::UnrecognizedSpecType(ref name) => {
                 write!(f, "Unrecognized spec type '{}'. Choose from: \
@@ -503,12 +497,14 @@ impl fmt::Display for Error {
             }
             Error::UnrecognizedStyle(ref name) => {
                 write!(f, "Unrecognized style attribute '{}'. Choose from: \
-                           nobold, bold.", name)
+                           nobold, bold, nointense, intense.", name)
             }
             Error::InvalidFormat(ref original) => {
-                write!(f, "Invalid color speci format: '{}'. Valid format \
-                           is '(path|line|match):(fg|bg|style):(value)'.",
-                           original)
+                write!(
+                    f,
+                    "Invalid color speci format: '{}'. Valid format \
+                     is '(path|line|column|match):(fg|bg|style):(value)'.",
+                    original)
             }
         }
     }
@@ -525,6 +521,7 @@ impl From<ParseColorError> for Error {
 pub struct ColorSpecs {
     path: ColorSpec,
     line: ColorSpec,
+    column: ColorSpec,
     matched: ColorSpec,
 }
 
@@ -554,7 +551,7 @@ pub struct ColorSpecs {
 /// The format of a `Spec` is a triple: `{type}:{attribute}:{value}`. Each
 /// component is defined as follows:
 ///
-/// * `{type}` can be one of `path`, `line` or `match`.
+/// * `{type}` can be one of `path`, `line`, `column` or `match`.
 /// * `{attribute}` can be one of `fg`, `bg` or `style`. `{attribute}` may also
 ///   be the special value `none`, in which case, `{value}` can be omitted.
 /// * `{value}` is either a color name (for `fg`/`bg`) or a style instruction.
@@ -593,6 +590,7 @@ enum SpecValue {
 enum OutType {
     Path,
     Line,
+    Column,
     Match,
 }
 
@@ -623,6 +621,7 @@ impl ColorSpecs {
             match user_spec.ty {
                 OutType::Path => user_spec.merge_into(&mut specs.path),
                 OutType::Line => user_spec.merge_into(&mut specs.line),
+                OutType::Column => user_spec.merge_into(&mut specs.column),
                 OutType::Match => user_spec.merge_into(&mut specs.matched),
             }
         }
@@ -637,6 +636,11 @@ impl ColorSpecs {
     /// Return the color specification for coloring line numbers.
     fn line(&self) -> &ColorSpec {
         &self.line
+    }
+
+    /// Return the color specification for coloring column numbers.
+    fn column(&self) -> &ColorSpec {
+        &self.column
     }
 
     /// Return the color specification for coloring matched text.
@@ -714,6 +718,7 @@ impl FromStr for OutType {
         match &*s.to_lowercase() {
             "path" => Ok(OutType::Path),
             "line" => Ok(OutType::Line),
+            "column" => Ok(OutType::Column),
             "match" => Ok(OutType::Match),
             _ => Err(Error::UnrecognizedOutType(s.to_string())),
         }
@@ -765,6 +770,7 @@ mod tests {
         assert_eq!(ColorSpecs::new(user_specs), ColorSpecs {
             path: ColorSpec::default(),
             line: ColorSpec::default(),
+            column: ColorSpec::default(),
             matched: expect_matched,
         });
     }
@@ -799,6 +805,12 @@ mod tests {
         assert_eq!(spec, Spec {
             ty: OutType::Line,
             value: SpecValue::None,
+        });
+
+        let spec: Spec = "column:bg:green".parse().unwrap();
+        assert_eq!(spec, Spec {
+            ty: OutType::Column,
+            value: SpecValue::Bg(Color::Green),
         });
     }
 

@@ -123,9 +123,9 @@ Project home page: https://github.com/BurntSushi/ripgrep
   black. Styles are limited to nobold, bold, nointense or intense.
 
     The format of the flag is {type}:{attribute}:{value}. {type} should be one
-    of path, line or match. {attribute} can be fg, bg or style. Value is either
-    a color (for fg and bg) or a text style. A special format, {type}:none,
-    will clear all color settings for {type}.
+    of path, line, column or match. {attribute} can be fg, bg or style. Value
+    is either a color (for fg and bg) or a text style. A special format,
+    {type}:none, will clear all color settings for {type}.
 
     For example, the following command will change the match color to magenta
     and the background color for line numbers to yellow:
@@ -243,11 +243,15 @@ Project home page: https://github.com/BurntSushi/ripgrep
 : Don't respect version control ignore files (e.g., .gitignore).
   Note that .ignore files will continue to be respected.
 
---null
+-0, --null
 : Whenever a file name is printed, follow it with a NUL byte.
   This includes printing filenames before matches, and when printing
   a list of matching files such as with --count, --files-with-matches
   and --files.
+
+-o, --only-matching
+: Print only the matched (non-empty) parts of a matching line, with each such
+  part on a separate output line.
 
 --path-separator *SEPARATOR*
 : The path separator to use when printing file paths. This defaults to your

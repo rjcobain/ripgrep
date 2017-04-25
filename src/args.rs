@@ -5,7 +5,6 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::ops;
 use std::path::{Path, PathBuf};
-use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -66,6 +65,7 @@ pub struct Args {
     no_ignore_vcs: bool,
     no_messages: bool,
     null: bool,
+    only_matching: bool,
     path_separator: Option<u8>,
     quiet: bool,
     quiet_matched: QuietMatched,
@@ -88,26 +88,7 @@ impl Args {
     ///
     /// Also, initialize a global logger.
     pub fn parse() -> Result<Args> {
-        use clap::ErrorKind::*;
-
-        let matches = match app::app_short().get_matches_safe() {
-            Ok(matches) => matches,
-            Err(clap::Error { kind: HelpDisplayed, .. }) => {
-                let _ = ::app::app_long().print_help();
-                println!("");
-                process::exit(0);
-            }
-            Err(err) => err.exit(),
-        };
-        if matches.is_present("help-short") {
-            let _ = ::app::app_short().print_help();
-            println!("");
-            process::exit(0);
-        }
-        if matches.is_present("ripgrep-version") {
-            println!("ripgrep {}", crate_version!());
-            process::exit(0);
-        }
+        let matches = app::app().get_matches();
 
         let mut logb = env_logger::LogBuilder::new();
         if matches.is_present("debug") {
@@ -161,6 +142,7 @@ impl Args {
             .heading(self.heading)
             .line_per_match(self.line_per_match)
             .null(self.null)
+            .only_matching(self.only_matching)
             .path_separator(self.path_separator)
             .with_filename(self.with_filename)
             .max_columns(self.max_columns);
@@ -365,6 +347,7 @@ impl<'a> ArgMatches<'a> {
             no_ignore_vcs: self.no_ignore_vcs(),
             no_messages: self.is_present("no-messages"),
             null: self.is_present("null"),
+            only_matching: self.is_present("only-matching"),
             path_separator: try!(self.path_separator()),
             quiet: quiet,
             quiet_matched: QuietMatched::new(quiet),
@@ -754,7 +737,7 @@ impl<'a> ArgMatches<'a> {
                 if label == "auto" {
                     return Ok(None);
                 }
-                match Encoding::for_label(label.as_bytes()) {
+                match Encoding::for_label_no_replacement(label.as_bytes()) {
                     Some(enc) => Ok(Some(enc)),
                     None => Err(From::from(
                         format!("unsupported encoding: {}", label))),
@@ -788,12 +771,18 @@ impl<'a> ArgMatches<'a> {
         let casei =
             self.is_present("ignore-case")
             && !self.is_present("case-sensitive");
-        GrepBuilder::new(&try!(self.pattern()))
+        let mut gb = GrepBuilder::new(&try!(self.pattern()))
             .case_smart(smart)
             .case_insensitive(casei)
-            .line_terminator(b'\n')
-            .build()
-            .map_err(From::from)
+            .line_terminator(b'\n');
+
+        if let Some(limit) = try!(self.dfa_size_limit()) {
+            gb = gb.dfa_size_limit(limit);
+        }
+        if let Some(limit) = try!(self.regex_size_limit()) {
+            gb = gb.size_limit(limit);
+        }
+        gb.build().map_err(From::from)
     }
 
     /// Builds the set of glob overrides from the command line flags.
@@ -824,29 +813,62 @@ impl<'a> ArgMatches<'a> {
         btypes.build().map_err(From::from)
     }
 
-    /// Parses the max-filesize argument option into a byte count.
-    fn max_filesize(&self) -> Result<Option<u64>> {
-        use regex::Regex;
-
-        let max_filesize = match self.value_of_lossy("max-filesize") {
+    /// Parses an argument of the form `[0-9]+(KMG)?`.
+    ///
+    /// This always returns the result as a type `u64`. This must be converted
+    /// to the appropriate type by the caller.
+    fn parse_human_readable_size_arg(
+        &self,
+        arg_name: &str,
+    ) -> Result<Option<u64>> {
+        let arg_value = match self.value_of_lossy(arg_name) {
             Some(x) => x,
             None => return Ok(None)
         };
+        let re = regex::Regex::new("^([0-9]+)([KMG])?$").unwrap();
+        let caps = try!(
+            re.captures(&arg_value).ok_or_else(|| {
+                format!("invalid format for {}", arg_name)
+            }));
 
-        let re = Regex::new("^([0-9]+)([KMG])?$").unwrap();
-        let caps = try!(re.captures(&max_filesize)
-                          .ok_or("invalid format for max-filesize argument"));
-
-        let value = try!(caps[1].parse::<u64>().map_err(|err| err.to_string()));
+        let value = try!(caps[1].parse::<u64>());
         let suffix = caps.get(2).map(|x| x.as_str());
 
+        let v_10 = value.checked_mul(1024);
+        let v_20 = v_10.and_then(|x| x.checked_mul(1024));
+        let v_30 = v_20.and_then(|x| x.checked_mul(1024));
+
+        let try_suffix = |x: Option<u64>| {
+            if x.is_some() {
+                Ok(x)
+            } else {
+                Err(From::from(format!("number too large for {}", arg_name)))
+            }
+        };
         match suffix {
             None      => Ok(Some(value)),
-            Some("K") => Ok(Some(value * 1024)),
-            Some("M") => Ok(Some(value * 1024 * 1024)),
-            Some("G") => Ok(Some(value * 1024 * 1024 * 1024)),
-            _ => Err(From::from("invalid suffix for max-filesize argument"))
+            Some("K") => try_suffix(v_10),
+            Some("M") => try_suffix(v_20),
+            Some("G") => try_suffix(v_30),
+            _ => Err(From::from(format!("invalid suffix for {}", arg_name)))
         }
+    }
+
+    /// Parse the dfa-size-limit argument option into a byte count.
+    fn dfa_size_limit(&self) -> Result<Option<usize>> {
+        let r = try!(self.parse_human_readable_size_arg("dfa-size-limit"));
+        human_readable_to_usize("dfa-size-limit", r)
+    }
+
+    /// Parse the regex-size-limit argument option into a byte count.
+    fn regex_size_limit(&self) -> Result<Option<usize>> {
+        let r = try!(self.parse_human_readable_size_arg("regex-size-limit"));
+        human_readable_to_usize("regex-size-limit", r)
+    }
+
+    /// Parses the max-filesize argument option into a byte count.
+    fn max_filesize(&self) -> Result<Option<u64>> {
+        self.parse_human_readable_size_arg("max-filesize")
     }
 
     /// Returns true if ignore files should be ignored.
@@ -939,6 +961,27 @@ impl QuietMatched {
             None => false,
             Some(_) if !yes => false,
             Some(ref m) => { m.store(true, Ordering::SeqCst); true }
+        }
+    }
+}
+
+/// Convert the result of a `parse_human_readable_size_arg` call into
+/// a `usize`, failing if the type does not fit.
+fn human_readable_to_usize(
+    arg_name: &str,
+    value: Option<u64>,
+) -> Result<Option<usize>> {
+    use std::usize;
+
+    match value {
+        None => Ok(None),
+        Some(v) => {
+            if v <= usize::MAX as u64 {
+                Ok(Some(v as usize))
+            } else {
+                let msg = format!("number too large for {}", arg_name);
+                Err(From::from(msg))
+            }
         }
     }
 }

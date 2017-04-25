@@ -230,11 +230,10 @@ colorize your output and show line numbers, just like The Silver Searcher.
 Coloring works on Windows too! Colors can be controlled more granularly with
 the `--color` flag.
 
-One last thing before we get started: `ripgrep` assumes UTF-8 *everywhere*. It
-can still search files that are invalid UTF-8 (like, say, latin-1), but it will
-simply not work on UTF-16 encoded files or other more exotic encodings.
-[Support for other encodings may
-happen.](https://github.com/BurntSushi/ripgrep/issues/1)
+One last thing before we get started: generally speaking, `ripgrep` assumes the
+input is reading is UTF-8. However, if ripgrep notices a file is encoded as
+UTF-16, then it will know how to search it. For other encodings, you'll need to
+explicitly specify them with the `-E/--encoding` flag.
 
 To recursively search the current directory, while respecting all `.gitignore`
 files, ignore hidden files and directories and skip binary files:
@@ -378,6 +377,51 @@ $ cargo test
 ```
 
 from the repository root.
+
+### Tips
+
+#### Windows Powershell
+
+##### Powershell Profile
+
+To customize powershell on start-up there is a special powershell script that has to be created.
+In order to find its location run command `Get-Command $profile | Select-Object -ExpandProperty Definition`
+See [more](https://technet.microsoft.com/en-us/library/bb613488(v=vs.85).aspx) for profile details.
+
+Any powershell code in this file gets evaluated at the start of console.
+This way you can have own aliases to be created at start.
+
+##### Setup function alias
+
+Often you can find a need to make alias for the favourite utility.
+
+But powershell function aliases do not behave like your typical linux shell alias.
+
+You always need to propagate arguments and **Stdin** input.
+But it cannot be done simply as `function grep() { $input | rg.exe --hidden $args }`
+
+Use below example as reference to how setup alias in powershell.
+
+```powershell
+function grep {
+    $count = @($input).Count
+    $input.Reset()
+
+    if ($count) {
+        $input | rg.exe --hidden $args
+    }
+    else {
+        rg.exe --hidden $args
+    }
+}
+```
+
+Powershell special variables:
+* input - is powershell **Stdin** object that allows you to access its content.
+* args - is array of arguments passed to this function.
+
+This alias checks whether there is **Stdin** input and propagates only if there is some lines.
+Otherwise empty `$input` will make powershell to trigger `rg` to search empty **Stdin**
 
 ### Known issues
 
