@@ -32,7 +32,7 @@ On Linux we need to build 64-bit, 32-bit, and ARM. These steps assume that your 
 - To build 32-bit, first add the Rust target: `rustup target add i686-unknown-linux-musl`
   - Then ensure you have the 32-bit libraries you need for GCC: `apt-get install gcc-multilib`
   - Then ensure that GCC uses the stuff you just installed: `export CFLAGS=-m32`
-  - Finally, `cargo build --release --target=i686-unknown-linux-gnu`
+  - Finally, `cargo build --release --target=i686-unknown-linux-musl`
 - To build ARM, add the ARM target: `arm-unknown-linux-gnueabi`
   - Install a bunch of stuff: `sudo apt-get install arm-unknown-linux-gnueabi binutils-arm-linux-gnueabi gcc-arm-linux-gnueabi`
   - Create a file at `.cargo/config` with the following contents:
