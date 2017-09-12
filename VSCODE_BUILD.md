@@ -20,7 +20,7 @@ We need to ship a 32-bit binary for Windows, but Rust will probably be set up fo
 
 - You probably have `rustup` installed and on your path. If not, [install it](https://www.rustup.rs/).
 - Run `rustup target add i686-pc-windows-msvc` to install the 32 bit toolchain
-- Run `$env:RUSTFLAGS='-C target-feature=+crt-static -Z unstable-options`
+- Run `$env:RUSTFLAGS='-C target-feature=+crt-static -Z unstable-options'`
 - Run `cargo build --release --target=i686-pc-windows-msvc`, which will drop its binary at `./target/i686-pc-windows-msvc/release/rg`.
 - Done!
 
