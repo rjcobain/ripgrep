@@ -16,12 +16,13 @@ Start by installing Rust and following the directions at https://github.com/robl
 Nothing special.
 
 ### Windows
-We need to ship a 32-bit binary for Windows, but Rust will probably be set up for 64-bit mode by default. It also needs to be statically compiled so that it will run on machines that don't have the Visual C++ Runtime installed.
+We need to build both 32 and 64-bit for Windows. It also needs to be statically compiled so that it will run on machines that don't have the Visual C++ Runtime installed.
 
 - You probably have `rustup` installed and on your path. If not, [install it](https://www.rustup.rs/).
 - Run `rustup target add i686-pc-windows-msvc` to install the 32 bit toolchain
 - Run `$env:RUSTFLAGS='-C target-feature=+crt-static -Z unstable-options'`
-- Run `cargo build --release --target=i686-pc-windows-msvc`, which will drop its binary at `./target/i686-pc-windows-msvc/release/rg`.
+- Run `cargo build --release --target=i686-pc-windows-msvc` to build 32-bit
+- Run `cargo build --release --target=x86_64-pc-windows-msvc` to build 64-bit
 - Done!
 
 ### Linux
@@ -30,11 +31,11 @@ On Linux we need to build 64-bit, 32-bit, and ARM. These steps assume that your 
 - To build 64-bit, add a new target: `rustup target add x86_64-unknown-linux-musl`
   - Then build with that target: `cargo build --release --target=x86_64-unknown-linux-musl` to produce a statically-linked binary.
 - To build 32-bit, first add the Rust target: `rustup target add i686-unknown-linux-musl`
-  - Then ensure you have the 32-bit libraries you need for GCC: `apt-get install gcc-multilib`
+  - Then ensure you have the 32-bit libraries you need for GCC: `sudo apt-get install gcc-multilib`
   - Then ensure that GCC uses the stuff you just installed: `export CFLAGS=-m32`
   - Finally, `cargo build --release --target=i686-unknown-linux-musl`
-- To build ARM, add the ARM target: `arm-unknown-linux-gnueabi`
-  - Install a bunch of stuff: `sudo apt-get install arm-unknown-linux-gnueabi binutils-arm-linux-gnueabi gcc-arm-linux-gnueabi`
+- To build ARM, add the ARM target: `rustup target add arm-unknown-linux-gnueabi`
+  - Install a bunch of stuff: `sudo apt-get install binutils-arm-linux-gnueabi gcc-arm-linux-gnueabi`
   - Create a file at `.cargo/config` with the following contents:
     ```toml
     [target.arm-unknown-linux-gnueabi]
