@@ -34,12 +34,12 @@ On Linux we need to build 64-bit, 32-bit, and ARM. These steps assume that your 
   - Then ensure you have the 32-bit libraries you need for GCC: `sudo apt-get install gcc-multilib`
   - Then ensure that GCC uses the stuff you just installed: `export CFLAGS=-m32`
   - Finally, `cargo build --release --target=i686-unknown-linux-musl`
-- To build ARM, add the ARM target: `rustup target add arm-unknown-linux-gnueabi`
-  - Install a bunch of stuff: `sudo apt-get install binutils-arm-linux-gnueabi gcc-arm-linux-gnueabi`
+- To build ARM, add the ARM target: `rustup target add arm-unknown-linux-gnueabihf`
+  - Install a bunch of stuff: `sudo apt-get install binutils-arm-linux-gnueabi gcc-4.8-arm-linux-gnueabihf`
   - Create a file at `.cargo/config` with the following contents:
     ```toml
-    [target.arm-unknown-linux-gnueabi]
-    linker = "arm-linux-gnueabi-gcc"
+    [target.arm-unknown-linux-gnueabihf]
+      linker = "arm-linux-gnueabihf-gcc-4.8"
     ```
-  - Build: `cargo build --release --target=arm-unknown-linux-gnueabi`
+  - Build: `cargo build --release --target=arm-unknown-linux-gnueabihf`
   - To strip symbols, you'll need to run `arm-linux-gnueabi-strip ./rg` instead of using `strip`.
